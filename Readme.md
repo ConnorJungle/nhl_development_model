@@ -14,6 +14,34 @@ Before you start, change your working direction to ensure python has access to a
 cd ./nhl_development_model/src/
 ```
 
+Install necessary packages
+
+```
+pip install networkx
+
+pip install matplotlib
+
+pip install scipy
+
+pip install pandas
+
+pip install numpy
+
+pip install joblib
+
+pip install torch
+```
+
+The one package that causes difficulty is pygraphviz. Depending on your OS you need to get this package installed. I use MAC and was able to install using Brew package manager and installing pygraphviz doing the following:
+
+```
+brew install graphviz
+
+pip install graphviz
+
+pip install pygraphviz 
+```
+
 
 ```python
 import generate_player_seasons as g
@@ -74,7 +102,7 @@ sim.plot_network_graph()
 ```
 
 
-![png](Readme_files/Readme_13_0.png)
+![png](Readme_files/Readme_17_0.png)
 
 
 
