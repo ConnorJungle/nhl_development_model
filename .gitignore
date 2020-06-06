@@ -1,0 +1,17 @@
+*.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+*.csv
+*.png
+*.pyc
+*.avi
+*.mp4
+*.joblib
+*.html
+*.pdf
+*.dat
+*.docx
+*.xlsx
+*.xml
+*.svg
+*.jpg
+__pycache__
