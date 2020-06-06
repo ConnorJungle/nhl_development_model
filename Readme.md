@@ -8,9 +8,17 @@ player's development through time given present information and estiamte the
 possible leagues and performance a player should expect in subsequent seasons. 
 
 
+Before you start, change your working direction to ensure python has access to all the possible files
+
+```
+cd ./nhl_development_model/src/
+```
+
 
 ```python
 import generate_player_seasons as g
+
+%matplotlib inline
 ```
 
 `generate_player_seaons` is a python model that we will import to simulate a specifc U23 player
@@ -22,7 +30,7 @@ We are going to instantiate the module by invoking the `GeneratePlayer()` method
 sim = g.GeneratePlayer()
 ```
 
-    [14:34:50] WARNING: src/objective/regression_obj.cu:152: reg:linear is now deprecated in favor of reg:squarederror.
+    [14:56:35] WARNING: src/objective/regression_obj.cu:152: reg:linear is now deprecated in favor of reg:squarederror.
 
 
 Next we're going to initialize our module by passing an Elite Prospects playerid to the method `initialize_player`
@@ -66,7 +74,7 @@ sim.plot_network_graph()
 ```
 
 
-![png](Readme_files/Readme_11_0.png)
+![png](Readme_files/Readme_13_0.png)
 
 
 
