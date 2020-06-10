@@ -66,7 +66,19 @@ class GeneratePlayer(object):
         self.a_proportion = (self.player_df.apg / self.player_df.ppg).median()
         self.g_proportion = 1 - self.a_proportion
         self.projections = pd.DataFrame()
-        
+        self.position = self.get_position()
+        self.scoring_by_position()
+    
+    def scoring_by_position(self):
+    
+        data = self.dataset
+
+        data['primary_position'] = data.position.apply(get_primary_position)
+
+        self.position_ppg = data[(data.season_age >= 17)
+                                 & (data.season_age <= 23)].groupby('primary_position').ppg.mean().to_dict()
+
+
     def impute_games_played(self):
         
         team_mask = self.dataset.team.apply(lambda x : len(ast.literal_eval(x)) > 1)
@@ -81,6 +93,9 @@ class GeneratePlayer(object):
                                & ~(team_mask)
                                & (self.dataset.season_age <= 23)].groupby('league').gp.apply(lambda x: mode(x)[0][0]).round().to_dict()
         
+    def get_position(self):
+        
+        return get_primary_position(self.player_df.position.iloc[0])
         
     def load_features(self, target):
         
@@ -322,6 +337,7 @@ class GeneratePlayer(object):
         self.G.nodes[1]['league'] = self.start_league
         self.G.nodes[1]['age'] = self.start_age
         self.G.nodes[1]['epoints'] = self.player_df[self.player_df.season_age == self.player_df.season_age.max()].tp.values.item()
+        self.G.nodes[1]['ppg'] = self.player_df[self.player_df.season_age == self.player_df.season_age.max()].round(3).ppg.values.item()
         self.G.nodes[1]['cond_prob'] = node_probability(self.G, 1)
         self.G.nodes[1]['xvalue'] = round(node_expected_value(self.G, 1),3)
         
@@ -329,6 +345,7 @@ class GeneratePlayer(object):
             self.G.nodes[n]['league'] = self.projections[self.projections.node == n].league.values.item()
             self.G.nodes[n]['age'] = self.projections[self.projections.node == n].season_age.values.item()
             self.G.nodes[n]['epoints'] = self.projections[self.projections.node == n].epoints.values.item()
+            self.G.nodes[n]['ppg'] = self.projections[self.projections.node == n].ppg.round(3).values.item()
             self.G.nodes[n]['cond_prob'] = node_probability(self.G, n)
             self.G.nodes[n]['xvalue'] = round(node_expected_value(self.G, n),3)
         
@@ -353,7 +370,10 @@ class GeneratePlayer(object):
         pos = {u :(v[0] / y_rescale, y_map[v[1]]) for u,v in pos.items()}
 
         # set params
-        node_sizes = [int(self.G.nodes[1]['epoints'] *10)] + [int(v * 10) for v in self.projections.epoints.values.tolist()]
+#         node_sizes = [int(self.G.nodes[1]['ppg'] / self.position_ppg[self.position] * 300)] \
+#         + [int(v * 300) for v in self.projections.ppg.div(self.position_ppg[self.position]).values.tolist()]
+        node_sizes = [self.G.nodes[g]['ppg'] / self.position_ppg[self.position] * 500 for g in self.G.nodes]
+        self.node_sizes = node_sizes
 
         # draw nodes
         nodes = nx.draw_networkx_nodes(self.G,
@@ -395,18 +415,31 @@ class GeneratePlayer(object):
         # colourscale for colourbar
         pc = matplotlib.collections.PatchCollection(edges, cmap=plt.cm.Greys)
         pc.set_array([(5 + i) / (30 + 4) for i in range(30)])
-        plt.colorbar(pc)
+        plt.colorbar(pc).ax.set_title('Transition %')
         # create legend for projected points
         custom_leg = [mlines.Line2D([0], [0], marker='o', color='dodgerblue', linestyle='None') for _ in range(0,5)]
         # 4 part distirubtion
-        Q1 = np.percentile(self.projections.epoints.unique(), 25, interpolation = 'midpoint').round(1) 
-        Q2 = np.percentile(self.projections.epoints.unique(), 50, interpolation = 'midpoint').round(1) 
-        Q3 = np.percentile(self.projections.epoints.unique(), 75, interpolation = 'midpoint').round(1)
-        Q4 = np.percentile(self.projections.epoints.unique(), 100, interpolation = 'midpoint').round(1)
-        point_range=[Q4, Q3, Q2, Q1]
-        leg = plt.legend(custom_leg, point_range, title = 'Projected Points')
-        for i, points in enumerate(point_range):
-            leg.legendHandles[i]._legmarker.set_markersize(points / 5)
+        Q1 = np.percentile([self.G.nodes[g]['ppg'] for g in self.G.nodes], 25, interpolation = 'midpoint').round(1) 
+        Q2 = np.percentile([self.G.nodes[g]['ppg'] for g in self.G.nodes], 50, interpolation = 'midpoint').round(1) 
+        Q3 = np.percentile([self.G.nodes[g]['ppg'] for g in self.G.nodes], 75, interpolation = 'midpoint').round(1)
+        Q4 = np.percentile([self.G.nodes[g]['ppg'] for g in self.G.nodes], 100, interpolation = 'midpoint').round(1)
+        point_range=[Q1, Q2, Q3, Q4]
+        self.point_range = point_range
+        custom_leg = [mlines.Line2D([0], [0],
+                                    marker='o',
+                                    color='dodgerblue',
+                                    markersize=point_range[i] / self.position_ppg[self.position] * 10 ,
+                                    linestyle='None') for i in range(0,4)]
+        leg = plt.legend(custom_leg, point_range,
+                         title = 'Projected Points (PPG)',
+        #                  markerscale=30,
+                         labelspacing=2.5,
+                         handletextpad=1.5,
+                         borderpad=1.5,
+                         ncol=4,
+                         loc=(0.025, .025))
+            
+        ax.annotate('', xytext=(-.075, 0),  xy=(-.075, 1),  xycoords='axes fraction', arrowprops=dict(color='black', width=2))
 
         # axis changes
         ax.set_yticks(ages)
@@ -425,15 +458,41 @@ class GeneratePlayer(object):
         
         plt.show()
         
+    def get_nhl_value(self):
+
+        nodes = self.projections[(self.projections.start_node==1)].node
+
+        return dict(nhl_expected_value=round(sum([nhl_expected_value(self.G, n) for n in nodes]),2))
+
+    def get_nhl_path(self):
+
+        nodes = self.projections[(self.projections.season_age==23)
+                                  & (self.projections.league=='NHL')].node
+
+        probs = []
+        max_prob = 0
+        max_node = 1
+
+        for node in nodes:
+            node_prob = node_probability(self.G, node)
+            if node_prob > max_prob:
+                max_prob = node_prob
+                max_node = node
+            probs.append(node_prob)
+
+        return dict(nhl_likelihood=round(sum(probs),2), most_likelihood_nhl_node=max_node)
+        
     def calculate_value_metrics(self):
             
-        self.projections = self.projections.assign(nhl_xvalue=np.nan,xvalue=np.nan,cond_probability=np.nan,)
-            
-        for n in self.projections.node.values:
-            # add expected value to data frame
-            self.projections.loc[self.projections.node == n, ['nhl_xvalue']] = nhl_expected_value(self.G, n)
-            self.projections.loc[self.projections.node == n, ['xvalue']] = node_expected_value(self.G, n)
-            self.projections.loc[self.projections.node == n, ['cond_probability']] = node_probability(self.G, n)
+        player_value = dict(playerid = self.playerid,
+                            player_name = self.player_name,
+                            position = self.position)
+
+        player_value.update(self.get_nhl_path())
+
+        player_value.update(self.get_nhl_value())
+
+        self.player_value = player_value
             
     def run(self, playerid):
     
@@ -457,12 +516,8 @@ def node_expected_value(G, node):
     return sum(G.nodes[node]['epoints'] * G.nodes[node]['cond_prob'] for n in nx.ancestors(G, node) | {node})
 
 def nhl_expected_value(G, node):
-    
-    value = []
-    for n in sorted(nx.descendants(G, node)):
-        value.append(G.nodes[n]['xvalue'] if G.nodes[n]['league'] == 'NHL' else 0)
-    return np.sum(value)
-
-def nhl_expected_value(G, node):
         
-    return np.sum([G.nodes[n]['xvalue'] for n in nx.descendants(G, node) if G.nodes[n]['league'] == 'NHL']).round(1)
+    return np.sum([G.nodes[node]['epoints'] * G.nodes[node]['cond_prob']] + \
+                [G.nodes[n]['epoints'] * G.nodes[n]['cond_prob']\
+                   for n in nx.descendants(G, node) if G.nodes[n]['league'] == 'NHL']).round(1)
+
