@@ -59,6 +59,8 @@ class GeneratePlayer(object):
     def initialize_player(self, playerid):
         self.playerid = playerid
         self.player_df = self.dataset[self.dataset.playerid == int(playerid)]
+        # for current draft eligibles, impute their average draft position
+        self.player_df = draft_current_year(self.player_df)
         self.player_name = self.player_df.player.iloc[0]
         self.current_age = self.player_df.season_age.max()
         self.start_age = self.player_df.season_age.max()
@@ -181,7 +183,7 @@ class GeneratePlayer(object):
                                                  np.ndarray((player_league_features.shape[0], 1))) # dummy target array
                 lstm_preds = torch.cat((lstm_preds, pred_t))
 
-            self.league_probs.ix[i, 'ppg'] = lstm_preds.detach().numpy()[-1]
+            self.league_probs.loc[i, 'ppg'] = lstm_preds.detach().numpy()[-1]
         
         # partition ppg into assists and goals
         self.league_probs['gpg'] = self.league_probs.ppg * self.g_proportion
@@ -215,7 +217,7 @@ class GeneratePlayer(object):
             scoring_pred = self.scoring_model.predict(
                         player_league_features.T.fillna(0)[scoring_model_col_order]).round(3)
 
-            self.league_probs.ix[i, 'ppg'] = scoring_pred
+            self.league_probs.loc[i, 'ppg'] = scoring_pred
     
     def interpolate_team_scoring(self):
 
@@ -275,9 +277,9 @@ class GeneratePlayer(object):
         df['draft_year'] = df['draft_year'] .fillna(method = 'ffill') 
         df['draft_round'] = df['draft_round'].fillna(method = 'ffill')
         df['draft_pick'] = df['draft_pick'].fillna(method = 'ffill')
-        df['real_season_age'] = (df['real_season_age'].min() + np.arange(1, len(df) + 1))
-        df['start_year'] = (df['start_year'].min() + np.arange(1, len(df) + 1))
-        df['end_year'] = (df['end_year'].min() + np.arange(1, len(df) + 1))
+        df['real_season_age'] = (df['real_season_age'].min() + np.arange(0, len(df)))
+        df['start_year'] = (df['start_year'].min() + np.arange(0, len(df)))
+        df['end_year'] = (df['end_year'].min() + np.arange(0, len(df)))
 
         return df
             
@@ -285,7 +287,7 @@ class GeneratePlayer(object):
     
         while self.current_age + 1 <= 23:
 
-            print(f'--- Simulating Seasons --- {self.player_name} --- Age: {int(self.current_age)}')
+            # print(f'--- Simulating Seasons --- {self.player_name} --- Age: {int(self.current_age)}')
 
             if node_counter == 1:
                 self.generate_league_season(self.player_df)
@@ -298,27 +300,27 @@ class GeneratePlayer(object):
                 self.projections = self.projections.append(self.current_simulation)
                 node_counter += len(self.league_probs)
                 self.current_age += 1
-                print(f'--- Simulation Complete --- {self.player_name} --- Age: {int(self.current_age)}')
+                # print(f'--- Simulation Complete --- {self.player_name} --- Age: {int(self.current_age)}')
 
+            else:
+                # print(f'--- Simulating Seasons --- {self.player_name} --- Age: {int(self.current_age)}')
+                simulated_seasons = pd.DataFrame()
 
-            print(f'--- Simulating Seasons --- {self.player_name} --- Age: {int(self.current_age)}')
-            simulated_seasons = pd.DataFrame()
+                for _, sim in self.current_simulation.iterrows():
+                    player_df = self.fill_player_attributes(sim)
+                    self.generate_league_season(player_df)
+                    self.generate_league_scoring(player_df)
+                    self.interpolate_team_scoring()
+                    self.league_probs['start_node'] = sim['node']
+                    self.league_probs['node'] = np.arange(node_counter + 1, node_counter + 1 + len(self.league_probs))
+                    # Append predictions to projections dataframe
+                    simulated_seasons = simulated_seasons.append(self.league_probs)
+                    self.projections = self.projections.append(self.league_probs)
+                    node_counter += len(self.league_probs)
 
-            for _, sim in self.current_simulation.iterrows():
-                player_df = self.fill_player_attributes(sim)
-                self.generate_league_season(player_df)
-                self.generate_league_scoring(player_df)
-                self.interpolate_team_scoring()
-                self.league_probs['start_node'] = sim['node']
-                self.league_probs['node'] = np.arange(node_counter + 1, node_counter + 1 + len(self.league_probs))
-                # Append predictions to projections dataframe
-                simulated_seasons = simulated_seasons.append(self.league_probs)
-                self.projections = self.projections.append(self.league_probs)
-                node_counter += len(self.league_probs)
-
-            self.current_simulation = simulated_seasons
-            print(f'--- Simulation Complete --- {self.player_name} --- Age: {int(self.current_age)}')
-            self.current_age += 1
+                self.current_simulation = simulated_seasons
+                # print(f'--- Simulation Complete --- {self.player_name} --- Age: {int(self.current_age)}')
+                self.current_age += 1
 
             self.simulate_player_development(node_counter)
         
@@ -339,7 +341,6 @@ class GeneratePlayer(object):
         self.G.nodes[1]['epoints'] = self.player_df[self.player_df.season_age == self.player_df.season_age.max()].tp.values.item()
         self.G.nodes[1]['ppg'] = self.player_df[self.player_df.season_age == self.player_df.season_age.max()].round(3).ppg.values.item()
         self.G.nodes[1]['cond_prob'] = node_probability(self.G, 1)
-        self.G.nodes[1]['xvalue'] = round(node_expected_value(self.G, 1),3)
         
         for n in self.projections.node.values:
             self.G.nodes[n]['league'] = self.projections[self.projections.node == n].league.values.item()
@@ -347,7 +348,6 @@ class GeneratePlayer(object):
             self.G.nodes[n]['epoints'] = self.projections[self.projections.node == n].epoints.values.item()
             self.G.nodes[n]['ppg'] = self.projections[self.projections.node == n].ppg.round(3).values.item()
             self.G.nodes[n]['cond_prob'] = node_probability(self.G, n)
-            self.G.nodes[n]['xvalue'] = round(node_expected_value(self.G, n),3)
         
         self.calculate_value_metrics()
         
@@ -453,6 +453,8 @@ class GeneratePlayer(object):
         # save image
         fname = '_'.join(self.player_name.split()).lower()
         plt.savefig(f"../images/{fname}_{self.playerid}_player_development_network_graph.png",
+           bbox_inches='tight',
+           pad_inches=1,
            dpi=300,
            format='png')
         
@@ -480,7 +482,28 @@ class GeneratePlayer(object):
                 max_node = node
             probs.append(node_prob)
 
-        return dict(nhl_likelihood=round(sum(probs),2), most_likelihood_nhl_node=max_node)
+        return dict(nhl_likelihood=round(sum(probs),2),
+                     most_likely_nhl_node=max_node,
+                     most_likely_nhl_prob=round(node_probability(self.G, max_node),2),
+                     nhl_floor=nhl_value(self.G, max_node)
+                     )
+
+    def get_nhl_path_ceiling(self):
+
+        nodes = self.projections[(self.projections.season_age==23)].node
+
+        max_points = 0
+        max_node = 1
+
+        for node in nodes:
+            node_points = nhl_value(self.G, node)
+            if node_points > max_points:
+                max_points = node_points
+                max_node = node
+
+        ceiling_prob = round(node_probability(self.G, max_node),2)
+
+        return dict(nhl_ceiling=round(max_points, 0), nhl_maximizing_node=max_node, nhl_ceiling_prob=ceiling_prob)
         
     def calculate_value_metrics(self):
             
@@ -491,6 +514,8 @@ class GeneratePlayer(object):
         player_value.update(self.get_nhl_path())
 
         player_value.update(self.get_nhl_value())
+
+        player_value.update(self.get_nhl_path_ceiling())
 
         self.player_value = player_value
             
@@ -511,13 +536,14 @@ def node_probability(G, node):
         node=n
     return np.prod(probabilities)
 
-def node_expected_value(G, node):
+def nhl_value(G, node):
 
-    return sum(G.nodes[node]['epoints'] * G.nodes[node]['cond_prob'] for n in nx.ancestors(G, node) | {node})
+    return np.sum([G.nodes[node]['epoints'] if G.nodes[node]['league'] == 'NHL' else 0] +
+                  [G.nodes[n]['epoints'] for n in nx.ancestors(G, node) if G.nodes[n]['league'] == 'NHL']).round(1)
 
 def nhl_expected_value(G, node):
         
-    return np.sum([G.nodes[node]['epoints'] * G.nodes[node]['cond_prob']] + \
+    return np.sum([G.nodes[node]['epoints'] * G.nodes[node]['cond_prob'] if G.nodes[node]['league'] == 'NHL' else 0] + \
                 [G.nodes[n]['epoints'] * G.nodes[n]['cond_prob']\
                    for n in nx.descendants(G, node) if G.nodes[n]['league'] == 'NHL']).round(1)
 

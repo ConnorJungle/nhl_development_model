@@ -19,6 +19,14 @@ def is_forward(val):
     else:
         return 0
 
+def get_primary_position(val):
+
+    match = re.search('[c,w,lw,rw,f]', val.lower())
+
+    if match:
+        return 'F'
+    else:
+        return 'D'
 
 def is_drafted(df):
 
@@ -29,6 +37,36 @@ def is_drafted(df):
 
     return df
 
+def extract_rankings_from_text(text):
+    try:
+        text_string=re.findall("[0-9]+",text)
+        rankings=list(map(int,text_string))
+        avg_rankings=sum(rankings)/len(rankings)
+        return int(avg_rankings)
+    except TypeError:
+        return np.NaN
+
+def draft_current_year(df):
+    
+    df = df.set_index(['playerid', 'player', 'year'])
+    
+    df['assigned_draft_rank'] = df.apply(lambda x: extract_rankings_from_text(x.rankings),axis=1)
+    
+    df['assigned_draft_round'] = pd.cut(df.assigned_draft_rank, 
+                                    bins=[p for p in range(1, 219, 31)],
+                                    labels=[r for r in range(1, 8, 1)],
+                                    right=False)
+    
+    df['draft_round'] = np.where(df.draft_round.isnull(),
+                                df.assigned_draft_rank,
+                                df.draft_round)  
+    
+    df['draft_pick'] = np.where(df.draft_pick.isnull(),
+                               df.assigned_draft_round,
+                               df.draft_pick)  
+    
+    return df.drop(columns=['assigned_draft_rank', 'assigned_draft_round']).reset_index()
+    
 
 def get_season_age(df):
     '''Return the first year a player is NHL draft eligible'''
@@ -206,6 +244,8 @@ def prepare_features(df, target, scaler=None):
             df['league_y_plus_1'], drop_first=True, prefix='next_yr')
 
         X = X.merge(next_season_league, left_index=True, right_index=True)
+    else:
+        y = pd.get_dummies(y, prefix='next_yr')
 
     return X, y, scaler
 
