@@ -159,42 +159,6 @@ def draft_position(df):
 
     return df
 
-def prepare_x_y(df, target):
-
-    dummies = list(set(['league_y_plus_1', 'gp_y_plus_1']) - set([target]))
-
-    features = ['gp', 'forward',
-                'gpg', 'apg', 'ppg', 'is_drafted',
-                'perc_team_g', 'perc_team_a',
-                'perc_team_tp', 'real_season_age']
-
-    df = get_next_season_data(df)
-
-    df = df[(df.gp_y_plus_1.notnull()
-             & (df.season_age >= 16)
-             & (df.season_age <= 22))]
-
-    df = is_drafted(df)
-    df['forward'] = df.position.apply(is_forward)
-    df.set_index(['playerid', 'player', 'year'], inplace=True)
-
-    start_league = pd.get_dummies(df.league, drop_first=True)
-    season_age = pd.get_dummies(df.season_age, drop_first=True)
-    next_season_league = pd.get_dummies(
-        df[dummies], drop_first=True, prefix='next_yr')
-
-    X = df[features]
-    y = df[target]
-    X = X.merge(start_league, left_index=True, right_index=True)\
-        .merge(season_age, left_index=True, right_index=True)\
-        .merge(next_season_league, left_index=True, right_index=True)
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.25, random_state=42)
-
-    return X_train, X_test, y_train, y_test
-
-
 def prepare_features(df, target, scaler=None):
 
     features = ['forward', 'gp', 'gp_y_plus_1',
@@ -207,7 +171,7 @@ def prepare_features(df, target, scaler=None):
 
     df = df[(df.gp < 85)
         & (df.season_age >= 17)
-        & (df.season_age <= 23)
+        & (df.season_age <= 24)
         & (df.gp_y_plus_1.notnull())]
 
     df = is_drafted(df)
@@ -258,7 +222,7 @@ def prepare_features_single_season(df, scaler, target):
                 'perc_team_a', 'perc_team_tp']
 
     df = df[(df.season_age >= 17)
-            & (df.season_age <= 23)]
+            & (df.season_age <= 24)]
 
     df = is_drafted(df)
     df = draft_position(df)
@@ -293,7 +257,7 @@ def column_scaler(df, feature):
 
     df = df[(df.gp < 85)
         & (df.season_age >= 17)
-        & (df.season_age <= 23)
+        & (df.season_age <= 24)
         & (df.gp_y_plus_1.notnull())]
 
     X = df[[feature]]
@@ -302,45 +266,6 @@ def column_scaler(df, feature):
     scaler.fit(X)
 
     return scaler
-
-# def prepare_features(df, target):
-
-#     dummies = list(set(['league_y_plus_1', 'gp_y_plus_1']) - set([target]))
-
-#     features = ['forward', 'gp', 'gp_y_plus_1',
-#                 'draft_pick', 'is_drafted',
-#                 'height', 'weight', 'real_season_age',
-#                  'gpg', 'apg', 'ppg', 'perc_team_g',
-#                 'perc_team_a', 'perc_team_tp']
-
-#     df = get_next_season_data(df)
-
-#     df = df[(df.gp_y_plus_1.notnull()
-#              & (df.season_age >= 17)
-#              & (df.season_age <= 23))]
-
-#     df = is_drafted(df)
-#     df = draft_position(df)
-#     df['forward'] = df.position.apply(is_forward)
-#     df['real_season_age'] = df['real_season_age'] - df['season_age'] # scale age based on birthday
-
-#     df.set_index(['playerid', 'player', 'season_age'], inplace=True)
-
-#     start_league = pd.get_dummies(df.league, drop_first=True)
-#     next_season_league = pd.get_dummies(
-#         df[dummies], drop_first=True, prefix='next_yr')
-#     draft_round = pd.get_dummies(
-#         df.draft_round,  drop_first=True, prefix='round')
-
-#     X = df[features] # base categorical features
-#     y = df[target]
-#     X = X.merge(start_league, left_index=True, right_index=True)\
-#         .merge(next_season_league, left_index=True, right_index=True)\
-#         .merge(draft_round, left_index=True, right_index=True)
-
-#     return X, y
-
-
 
 def generate_players(X, y, indices):
 
@@ -361,9 +286,9 @@ def prepare_sequence(seq):
 
 def pad_data(df, players):
 
-    pad = pd.concat([pd.DataFrame([[i] for i in range(17, 24)],
+    pad = pd.concat([pd.DataFrame([[i] for i in range(17, 25)],
                                   columns=['age'],
-                                  index=pd.MultiIndex.from_tuples([player for i in range(17, 24)],
+                                  index=pd.MultiIndex.from_tuples([player for i in range(17, 25)],
                                                                   names=['playerid', 'player']))
                      for player in players]).reset_index()
 
@@ -376,7 +301,7 @@ def pad_data(df, players):
 
 def pad_sequence(df):
 
-    pad = pd.DataFrame([[i] for i in range(17, 24)],
+    pad = pd.DataFrame([[i] for i in range(17, 25)],
                        columns=['age'])
 
     padded = pad.merge(df,
@@ -385,11 +310,3 @@ def pad_sequence(df):
                        how='left').fillna(-1)
 
     return padded.drop(columns=['age'])
-# def generate_players(X, y, indices):
-
-#     return [(X.loc[idx], y.loc[idx]) for idx in indices]
-
-
-# def prepare_sequence(seq):
-
-#     return seq.index, torch.FloatTensor(seq.values)
