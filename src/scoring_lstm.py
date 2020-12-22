@@ -4,37 +4,38 @@ import torch
 import time
 
 class Model(nn.Module):
-    def __init__(self, input_size=73, hidden_size=146, output_size=1, use_cuda=False):
+    def __init__(self, input_size=80, hidden_size=160, lstm_layers=2, output_size=1, drop=0.2, use_cuda=False):
         
         super().__init__()
         self.start = time.time()
         self.hidden_size = hidden_size
-        self.lstm = nn.LSTM(input_size, hidden_size, output_size, batch_first=True)
+        self.lstm_layers = lstm_layers
+        self.lstm = nn.LSTM(input_size, hidden_size, lstm_layers, batch_first=True,
+#                             dropout=drop
+                           )
         self.linear = nn.Linear(hidden_size, output_size)  
         self.relu = nn.ReLU()
-
+        
         device = torch.cuda.is_available()
         self.device = torch.device("cuda:0" if use_cuda and device else "cpu")
 
-    def forward(self, seasons, targets):
-        
-        mask = torch.tensor([(season > -1).all() for season in seasons]).to(self.device) # create mask for real seasons only      
-        targets = torch.FloatTensor(targets)[mask].to(self.device)
-        ht = torch.zeros(1, 1, self.hidden_size).to(self.device)   # initialize hidden state
-        ct = torch.zeros(1, 1, self.hidden_size).to(self.device)  # initialize cell state
-        predictions = torch.Tensor([]).to(self.device) # to store our predictions for season t+1
+    def forward(self, seasons):
 
+        ht = torch.zeros(self.lstm_layers, 1, self.hidden_size)   # initialize hidden state
+        ct = torch.zeros(self.lstm_layers, 1, self.hidden_size)  # initialize cell state
+        predictions = torch.Tensor([]) # to store our predictions for season t+1
+        
         hidden = (ht, ct)
         
         for idx, season in enumerate(seasons):  # here we want to iterate over the time dimension
-            lstm_input = torch.FloatTensor(season).view(1,1,len(season)).to(self.device) # LSTM takes 3D tensor
+            lstm_input = torch.FloatTensor(season).view(1,1,len(season)) # LSTM takes 3D tensor
             out, hidden = self.lstm(lstm_input, hidden) # LSTM updates hidden state and returns output
             pred_t = self.linear(out) # pass LSTM output through a linear activation function
             pred_t = self.relu(pred_t) # since performance is non-negative we apply ReLU
             
             predictions = torch.cat((predictions, pred_t)) # concatenate all the predictions
 
-        return predictions[mask].squeeze(1), targets
+        return predictions
 
 class Trainer(object):
     def __init__(self, train_sequences, train_targets, test_sequences, test_targets, model, epochs=200, lr=0.01, batch_size=1, log_per=10000):

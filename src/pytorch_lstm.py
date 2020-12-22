@@ -14,21 +14,19 @@ from optuna.trial import FixedTrial
 
 from data_processing import *
 
+import time
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-EPOCHS = 10
+EPOCHS = 20
 LOG_INTERVAL = 10
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
-# Get the player dataset.
-X, y, train_sequences, train_targets, test_sequences, test_targets, train_idx, test_idx, train_real_values, test_real_values, train_idx_bool, test_idx_bool = get_player_dataset()
-
-
 def get_player_dataset(target='ppg_y_plus_1'):
 
-    df = pd.read_csv('../data/player_season_stats.csv')
+    df = pd.read_csv(f'{args.data_dir}/player_season_stats.csv')
 
     X, y,_ = prepare_features(df, target)
 
@@ -54,7 +52,14 @@ def get_player_dataset(target='ppg_y_plus_1'):
     train_real_values = (X[train_idx_bool] != -1).all(axis=1)
     test_real_values = (X[test_idx_bool] != -1).all(axis=1)
 
-    return X, y, train_seq, train_target, test_seq, test_target, train_idx, test_idx, train_real_values, test_real_values, train_idx_bool, test_idx_bool
+    return X, y, train_seq, train_target, test_seq, test_target, train_real_values, test_real_values
+
+def model_fn(model_dir):
+    model = Model()
+#     model_dir = args.model_dir
+    with open(os.path.join(model_dir, 'model.pth'), 'rb') as f:
+        model.load_state_dict(torch.load(f))
+    return model
 
 def save_model(model, model_dir, trial_number):
     logger.info("Saving the model_{}.".format(trial_number))
@@ -65,12 +70,12 @@ def save_model(model, model_dir, trial_number):
 def define_model(trial):
     # We optimize the number of layers, hidden untis and dropout ratio in each layer.
     lstm_layers = trial.suggest_int("lstm_layers", 2, 4)
-    lstm_hidden = trial.suggest_int("lstm_hidden", low=73, high=73*3, step=73)
+    lstm_hidden = trial.suggest_int("lstm_hidden", low=74, high=74*3, step=74)
 
     return Model(lstm_layers=lstm_layers, hidden_size=lstm_hidden)
 
 class Model(nn.Module):
-    def __init__(self, input_size=74, hidden_size=74, lstm_layers=3, output_size=1, drop=0.2):
+    def __init__(self, input_size=74, hidden_size=148, lstm_layers=2, output_size=1, drop=0.2):
         
         super().__init__()
         self.start = time.time()
@@ -100,15 +105,13 @@ class Model(nn.Module):
 
         return predictions
     
-def objective(trial):
+def objective(trial, train_sequences, train_targets, test_sequences, test_targets):
 
     # Generate the model.
     model = define_model(trial).to(DEVICE)
-
-    # Generate the optimizers.
-    optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "RMSprop", "SGD"])
-    lr = trial.suggest_float("lr", 1e-3, 1e-1, log=True)
-    optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
+    
+    lr = trial.suggest_float("lr", 1e-3, 1e-2, log=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     
     loss_fn = nn.MSELoss()
     
@@ -153,20 +156,18 @@ def objective(trial):
             # now here, we want to compute the loss between the predicted values
             # for each season and the actual values for each season
             # TO-DO: random select grouth truth or predicted value in next timestep
-            loss = self.loss_fn(predictions[mask].squeeze(1), targets) 
+            loss = loss_fn(predictions[mask].squeeze(1), targets) 
             test_loss.append(loss.item())
 
-    
-    print(f'epoch: {ep:3} train avg. loss: {np.nanmean(avg_train_losses):10.8f}')
-    print(f'epoch: {ep:3} test loss: {np.nanmean(test_loss):10.8f}')
+    print(f'epoch: {epoch} train avg. loss: {np.nanmean(avg_train_losses):10.8f}')
+    print(f'epoch: {epoch} test loss: {np.nanmean(test_loss):10.8f}')
 
     save_model(model, '/tmp', trial.number)
-    
-    trial.set_user_attr('job_name', args.training_env['job_name'])
     
     return np.nanmean(avg_train_losses)
     
 if __name__ == "__main__":
+    
     parser = argparse.ArgumentParser()
 
     # To configure Optuna db
@@ -183,12 +184,15 @@ if __name__ == "__main__":
     parser.add_argument('--training-env', type=str, default=json.loads(os.environ['SM_TRAINING_ENV']))
     
     args, _ = parser.parse_known_args()    
+    
+    # Get the player dataset.
+    X, y, train_sequences, train_targets, test_sequences, test_targets, train_idx, test_idx, train_real_values, test_real_values, train_idx_bool, test_idx_bool = get_player_dataset()
 
     secret = get_secret(args.db_secret, args.region_name)
     connector = 'pymysql'
     db = 'mysql+{}://{}:{}@{}/{}'.format(connector, secret['username'], secret['password'], args.host, args.db_name)
 
-    study = optuna.study.load_study(study_name=args.study_name, storage=db, direction='minimize', load_if_exists=True)
+    study = optuna.study.load_study(study_name=args.study_name, storage=db)
     study.optimize(objective, n_trials=args.n_trials)
 
     logger.info("Number of finished trials: {}".format(len(study.trials)))

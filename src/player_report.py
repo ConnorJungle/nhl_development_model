@@ -30,33 +30,33 @@ def player_seasons_table(player):
     return player.player_df[col_order].astype({'gp':int,'g':int, 'a':int, 
                                                'tp': int,'ppg': float, 
                                                'apg':float, 'gpg':float,
-                                               'season_age':int}).round({'ppg': 2, 'apg':2, 'gpg':2}).to_markdown()
+                                               'season_age':int}).round({'ppg': 2, 'apg':2, 'gpg':2})
 
 def player_ceiling_table(player):
 
     season = player.projections[player.projections.node == player.player_value['nhl_maximizing_node']]
 
-    col_order = ['league', 'season_age', 'probability', 'gp', 'egoals', 
-                 'eassists', 'epoints', 'gpg', 'apg', 'ppg']
+    col_order = ['league', 'season_age', 'probability', 'gp', 'g', 
+                 'a', 'tp', 'gpg', 'apg', 'ppg']
     
     return player.recursive_season_concat(season.squeeze())[col_order].astype({
-        'egoals':int, 'eassists':int, 
-        'epoints': int,'ppg': float, 
+        'g':int, 'a':int, 
+        'tp': int,'ppg': float, 
         'apg':float, 'gpg':float,
-        'probability':float}).round({'ppg': 2, 'apg':2, 'gpg':2, 'probability' : 2}).to_markdown()
+        'probability':float}).round({'ppg': 2, 'apg':2, 'gpg':2, 'probability' : 2})
 
 def player_floor_table(player):
 
     season = player.projections[player.projections.node == player.player_value['most_likely_nhl_node']]
 
-    col_order = ['league', 'season_age', 'probability', 'gp', 'egoals', 
-                 'eassists', 'epoints', 'gpg', 'apg', 'ppg']
+    col_order = ['league', 'season_age', 'probability', 'gp', 'g', 
+                 'a', 'tp', 'gpg', 'apg', 'ppg']
     
     return player.recursive_season_concat(season.squeeze())[col_order].astype({
-        'egoals':int, 'eassists':int, 
-        'epoints': int,'ppg': float, 
+        'g':int, 'a':int, 
+        'tp': int,'ppg': float, 
         'apg':float, 'gpg':float,
-        'probability':float}).round({'ppg': 2, 'apg':2, 'gpg':2, 'probability' : 2}).to_markdown()
+        'probability':float}).round({'ppg': 2, 'apg':2, 'gpg':2, 'probability' : 2})
 
 
 def create_player_report(playerid):
@@ -74,15 +74,15 @@ def create_player_report(playerid):
     player_header(player)
     # print dataframe of player current stats
     display(Markdown(f'### Player Stats'))
-    display(Markdown(player_seasons_table(player)))
+    display(Markdown(player_seasons_table(player).to_markdown(index=False)))
     # plot player development graph
     player.plot_network_graph()
     # print player floor table
     display(Markdown(f'### Most Likely Player Development Path'))
-    display(Markdown(player_floor_table(player)))
+    display(Markdown(player_floor_table(player).to_markdown(index=False)))
     # print player ceiling table
     display(Markdown(f'### Maximum NHL Value Development Path'))
-    display(Markdown(player_ceiling_table(player)))
+    display(Markdown(player_ceiling_table(player).to_markdown(index=False)))
     fig, ax = plt.subplots(figsize=(20,10))
     plt.title('Notes', fontsize=18, fontweight='bold', loc='left')
     plt.tick_params(bottom=False, left=False, labelbottom = False, labelleft=False)

@@ -6,9 +6,42 @@ import warnings
 import torch
 import re
 
+from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
+
 warnings.filterwarnings('ignore')
 
 pd.set_option('max_column', 0)
+
+def load_data():
+
+    df = pd.read_csv('player_season_stats.csv')
+
+    X, y,_ = prepare_features(df, 'ppg_y_plus_1')
+
+    players = X.index.droplevel(-1).unique() # get number indices
+    n_players = players.shape[0] # get number of players
+    train_idx, test_idx = train_test_split(players, test_size=0.3, random_state=18)
+
+    print('--- Padding Player Data ---')
+
+    X = pad_data(X.reset_index(), players)
+    y = pad_data(y.reset_index(), players)
+
+    X.set_index(['playerid', 'player', 'season_age'], inplace=True)
+    y.set_index(['playerid', 'player', 'season_age'], inplace=True)
+
+    print('--- Generating Player Data ---')
+    train_seq, train_target = generate_players(X, y, train_idx)
+    test_seq, test_target = generate_players(X, y, test_idx)
+
+    train_idx_bool = pd.Series(list(X.index.droplevel(-1))).isin(train_idx).values
+    test_idx_bool = pd.Series(list(X.index.droplevel(-1))).isin(test_idx).values
+
+    train_real_values = (X[train_idx_bool] != -1).all(axis=1)
+    test_real_values = (X[test_idx_bool] != -1).all(axis=1)
+
+    return X, y, train_seq, train_target, test_seq, test_target, train_idx_bool, test_idx_bool, train_real_values, test_real_values
 
 def is_forward(val):
 
@@ -46,28 +79,39 @@ def extract_rankings_from_text(text):
     except TypeError:
         return np.NaN
 
-def draft_current_year(df):
+def draft_current_year(df, start_year=None):
     
     df = df.set_index(['playerid', 'player', 'year'])
     
-    df['assigned_draft_rank'] = df.apply(lambda x: extract_rankings_from_text(x.rankings),axis=1)
-    
-    df['assigned_draft_round'] = pd.cut(df.assigned_draft_rank, 
-                                    bins=[p for p in range(1, 219, 31)],
-                                    labels=[r for r in range(1, 8, 1)],
-                                    right=False)
-    
-    df['draft_round'] = np.where(df.draft_round.isnull(),
-                                df.assigned_draft_rank,
-                                df.draft_round)  
-    
-    df['draft_pick'] = np.where(df.draft_pick.isnull(),
-                               df.assigned_draft_round,
-                               df.draft_pick)  
-    
-    return df.drop(columns=['assigned_draft_rank', 'assigned_draft_round']).reset_index()
-    
+    # get rankings information for players
+    try:
+        df['assigned_draft_rank'] = df.apply(lambda x: extract_rankings_from_text(x.rankings),axis=1)
+        
+        df['assigned_draft_round'] = pd.cut(df.assigned_draft_rank, 
+                                        bins=[p for p in range(1, 219, 31)],
+                                        labels=[r for r in range(1, 8, 1)],
+                                        right=False)
 
+        df['draft_year'] = df['draft_year_eligible']
+        
+        df['draft_round'] = np.where(df.draft_round.isnull(),
+                                    df.assigned_draft_round,
+                                    df.draft_round)  
+        
+        df['draft_pick'] = np.where(df.draft_pick.isnull(),
+                                df.assigned_draft_rank,
+                                df.draft_pick)  
+
+        df = df.drop(columns=['assigned_draft_rank', 'assigned_draft_round'])
+
+    except:
+        pass
+
+    if start_year:
+        df = df[df.season_age <= start_year]
+    
+    return df.reset_index()
+    
 def get_season_age(df):
     '''Return the first year a player is NHL draft eligible'''
 
@@ -90,7 +134,6 @@ def get_season_age(df):
         (end_of_year - df['date_of_birth']) / np.timedelta64(1, 'Y')).round(2)
 
     return df.reset_index()
-
 
 def collapse_player_league_seasons(df):
 
@@ -147,15 +190,23 @@ def draft_position(df):
                                  np.where(df.draft_round.notnull(),
                                           df.draft_round,
                                           0),
-                                 0
+                                 np.where(df.end_year >= df.draft_year,
+                                        np.where(df.draft_round.notnull(),
+                                                df.draft_round,
+                                                0),
+                                        0)
                                  )
 
     df['draft_pick'] = np.where(df.is_drafted == 1,
                                 np.where(df.draft_pick.notnull(),
                                          df.draft_pick,
                                          0),
-                                0
-                                )
+                                 np.where(df.end_year >= df.draft_year,
+                                        np.where(df.draft_pick.notnull(),
+                                                df.draft_pick,
+                                                0),
+                                        0)
+                                 )
 
     return df
 
@@ -240,10 +291,14 @@ def prepare_features_single_season(df, scaler, target):
         df.draft_round, prefix='round')
 
     X = df[[f for f in features if (target == 
-            'league_y_plus_1' and f != 'gp_y_plus_1') | (target == 'ppg_y_plus_1')]]
+            'league_y_plus_1' and f != 'gp_y_plus_1') | (target == 'ppg_y_plus_1' )]]
 
     # feature scaling
     X[X.columns] = scaler.transform(X)
+
+    if target == 'ppg_y_plus_1':
+        end_league = pd.get_dummies(df.league_y_plus_1, prefix='next_yr')    
+        X = X.merge(end_league, left_index=True, right_index=True)
 
     X = X.merge(start_league, left_index=True, right_index=True)\
         .merge(season_age, left_index=True, right_index=True)\
@@ -310,3 +365,16 @@ def pad_sequence(df):
                        how='left').fillna(-1)
 
     return padded.drop(columns=['age'])
+
+def check_late_birthday(date_of_birth):
+
+    try:
+        dt = datetime.strptime(date_of_birth, '%Y-%m-%d')
+        draft = date(dt.year + 18, 9, 15)
+        if relativedelta(draft, dt).years < 18 :
+            return True
+        else:
+            return False
+
+    except:
+        return None
